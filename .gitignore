@@ -1,5 +1,2 @@
-data/memory.db
-data/current_project
-data/logs/
 __pycache__/
 .venv/
