@@ -2,10 +2,7 @@
   "description": "yasumem - session memory hooks",
   "hooks": {
     "SessionStart": [{
-      "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh", "timeout": 15}]
-    }],
-    "SessionEnd": [{
-      "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-stop.sh", "timeout": 30}]
+      "hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh", "timeout": 30}]
     }]
   }
 }
