@@ -51,7 +51,7 @@ def memory_recent(days: int = 7, limit: int = 10) -> str:
     """直近の記憶一覧を取得する。最近のセッションで何を議論したか確認。"""
     conn = get_connection(DB_PATH)
     try:
-        results = search(conn, "", limit=limit)
+        results = search(conn, "", limit=limit, max_age_days=days)
         if not results:
             return "直近の記憶がありません。"
         lines = []

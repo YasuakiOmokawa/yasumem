@@ -9,6 +9,12 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "memory.db"
 
+NOISE_FILTER = (
+    "AND content NOT LIKE '<local-command%' "
+    "AND content NOT LIKE '<command-name>%' "
+    "AND content NOT LIKE '[Tool:%'"
+)
+
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 PRAGMA busy_timeout=5000;
@@ -216,14 +222,23 @@ def search(
     query: str,
     limit: int = 5,
     project_filter: str | None = None,
+    max_age_days: int | None = None,
 ) -> list[Chunk]:
+    time_filter = ""
+    time_params: tuple = ()
+    if max_age_days is not None:
+        cutoff = time.time() - (max_age_days * 86400)
+        time_filter = "AND created_at > ?"
+        time_params = (cutoff,)
+
     if not query:
         # Empty query: return recent chunks
         results = get_recent_chunks(conn, project_filter or "", limit=20) if project_filter else []
         if not results:
             rows = conn.execute(
-                "SELECT id, session_id, project_path, git_branch, chunk_index, role, content, created_at "
-                "FROM chunks ORDER BY created_at DESC LIMIT ?", (20,)
+                f"SELECT id, session_id, project_path, git_branch, chunk_index, role, content, created_at "
+                f"FROM chunks WHERE 1=1 {NOISE_FILTER} {time_filter} ORDER BY created_at DESC LIMIT ?",
+                (*time_params, 20),
             ).fetchall()
             results = _rows_to_chunks(rows)
     elif len(query) < 3:
@@ -268,10 +283,11 @@ def get_recent_chunks(
     limit: int = 10,
 ) -> list[Chunk]:
     rows = conn.execute(
-        """SELECT id, session_id, project_path, git_branch,
+        f"""SELECT id, session_id, project_path, git_branch,
                   chunk_index, role, content, created_at
            FROM chunks
            WHERE project_path = ?
+           {NOISE_FILTER}
            ORDER BY created_at DESC
            LIMIT ?""",
         (project_path, limit),
