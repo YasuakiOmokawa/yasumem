@@ -1,0 +1,5 @@
+{
+  "name": "yasumem",
+  "version": "0.1.0",
+  "description": "セッション間の記憶を永続化・検索するClaude Codeプラグイン"
+}

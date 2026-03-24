@@ -1,0 +1,16 @@
+[project]
+name = "yasumem"
+version = "0.1.0"
+description = "Session memory for Claude Code"
+requires-python = ">=3.10"
+dependencies = ["mcp>=1.0.0"]
+
+[project.optional-dependencies]
+vector = ["sentence-transformers>=3.0.0", "sqlite-vec>=0.1.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yasumem"]
