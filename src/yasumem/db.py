@@ -35,7 +35,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
     content=chunks,
     content_rowid=id,
-    tokenize='unicode61'
+    tokenize='trigram'
 );
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
@@ -94,11 +94,32 @@ def resolve_canonical_project(cwd: str) -> str:
     return cwd
 
 
+def _migrate_fts_tokenizer(conn: sqlite3.Connection) -> None:
+    """Migrate FTS5 tokenizer from unicode61 to trigram if needed."""
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='chunks_fts' AND type='table'"
+        ).fetchone()
+        if row and "trigram" not in row[0]:
+            conn.execute("DROP TABLE IF EXISTS chunks_fts")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_ai")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_ad")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_au")
+    except Exception:
+        pass
+
+
 def get_connection(db_path: str | Path | None = None) -> sqlite3.Connection:
     path = str(db_path or DEFAULT_DB_PATH)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     conn = sqlite3.connect(path)
+    _migrate_fts_tokenizer(conn)
     conn.executescript(SCHEMA_SQL)
+    # Rebuild FTS content after potential migration
+    try:
+        conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+    except Exception:
+        pass
     conn.row_factory = sqlite3.Row
     return conn
 
