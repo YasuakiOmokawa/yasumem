@@ -12,12 +12,24 @@ DB_PATH = os.environ.get(
     str(Path(__file__).resolve().parent.parent.parent / "data" / "memory.db"),
 )
 
+CURRENT_PROJECT_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "current_project"
+
+
+def _get_current_project() -> str | None:
+    try:
+        return CURRENT_PROJECT_FILE.read_text().strip() or None
+    except (FileNotFoundError, OSError):
+        return None
+
+
 mcp = FastMCP("yasumem")
 
 
 @mcp.tool()
-def memory_search(query: str, limit: int = 5, project_filter: str | None = None) -> str:
-    """過去のセッション記憶をハイブリッド検索する。キーワードで過去の議論や決定事項を検索。"""
+def memory_search(query: str, limit: int = 5, project_filter: str | None = None, all_projects: bool = False) -> str:
+    """過去のセッション記憶をハイブリッド検索する。キーワードで過去の議論や決定事項を検索。デフォルトはカレントプロジェクトのみ。all_projects=Trueで全プロジェクト横断検索。"""
+    if not all_projects and project_filter is None:
+        project_filter = _get_current_project()
     conn = get_connection(DB_PATH)
     try:
         results = search(conn, query, limit=limit, project_filter=project_filter)
@@ -47,11 +59,12 @@ def memory_save(content: str) -> str:
 
 
 @mcp.tool()
-def memory_recent(days: int = 7, limit: int = 10) -> str:
-    """直近の記憶一覧を取得する。最近のセッションで何を議論したか確認。"""
+def memory_recent(days: int = 7, limit: int = 10, all_projects: bool = False) -> str:
+    """直近の記憶一覧を取得する。最近のセッションで何を議論したか確認。デフォルトはカレントプロジェクトのみ。all_projects=Trueで全プロジェクト横断。"""
+    project_filter = None if all_projects else _get_current_project()
     conn = get_connection(DB_PATH)
     try:
-        results = search(conn, "", limit=limit, max_age_days=days)
+        results = search(conn, "", limit=limit, max_age_days=days, project_filter=project_filter)
         if not results:
             return "直近の記憶がありません。"
         lines = []
