@@ -18,7 +18,6 @@ from yasumem.db import (
     resolve_canonical_project,
     save_chunks,
     save_session,
-    session_exists,
 )
 from yasumem.ingest import encode_cwd, parse_jsonl
 
@@ -82,9 +81,6 @@ def main():
 
         for jsonl_path in recent_jsonls:
             session_id = jsonl_path.stem
-            if session_exists(conn, session_id):
-                continue
-
             try:
                 result = parse_jsonl(jsonl_path)
                 meta = result["meta"]

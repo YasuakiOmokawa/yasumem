@@ -142,8 +142,9 @@ def save_session(
     ended_at: float | None,
 ) -> None:
     conn.execute(
-        """INSERT OR IGNORE INTO sessions (session_id, project_path, git_branch, started_at, ended_at)
-           VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO sessions (session_id, project_path, git_branch, started_at, ended_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET ended_at = excluded.ended_at""",
         (session_id, project_path, git_branch, started_at, ended_at),
     )
 
