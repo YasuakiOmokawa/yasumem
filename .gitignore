@@ -1,2 +1,6 @@
-__pycache__/
-.venv/
+bin/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/current_project
+data/logs/

@@ -1,6 +1,6 @@
 {
   "yasumem": {
-    "command": "uv",
-    "args": ["--directory", "${CLAUDE_PLUGIN_ROOT}", "run", "python3", "-m", "yasumem.server"]
+    "command": "${CLAUDE_PLUGIN_ROOT}/bin/yasumem",
+    "args": ["server"]
   }
 }
