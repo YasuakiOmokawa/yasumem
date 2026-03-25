@@ -297,9 +297,6 @@ func runIngest() {
 	count, _ := saveChunks(db, chunks)
 	fmt.Fprintf(os.Stderr, "Saved %d chunks from session %s\n", count, input.SessionID)
 
-	if pruned := pruneOldChunks(db, 90); pruned > 0 {
-		fmt.Fprintf(os.Stderr, "Pruned %d old chunks\n", pruned)
-	}
 }
 
 // --- Ingest-recent command (SessionStart) ---
@@ -409,9 +406,4 @@ func runIngestRecent() {
 		fmt.Fprintf(os.Stderr, "Ingested %d chunks from %s\n", count, sessionID)
 	}
 
-	if ingested > 0 {
-		if pruned := pruneOldChunks(db, 90); pruned > 0 {
-			fmt.Fprintf(os.Stderr, "Pruned %d old chunks\n", pruned)
-		}
-	}
 }
