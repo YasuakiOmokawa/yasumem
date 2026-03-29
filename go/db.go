@@ -61,6 +61,45 @@ CREATE INDEX IF NOT EXISTS idx_chunks_session ON chunks(session_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_project ON chunks(project_path);
 CREATE INDEX IF NOT EXISTS idx_chunks_created ON chunks(created_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_path);
+
+CREATE TABLE IF NOT EXISTS lessons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL DEFAULT 'lesson',
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    project_path TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    source_ref TEXT NOT NULL DEFAULT '',
+    recall_count INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS lessons_fts USING fts5(
+    title, content, tags,
+    content=lessons,
+    content_rowid=id,
+    tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS lessons_ai AFTER INSERT ON lessons BEGIN
+    INSERT INTO lessons_fts(rowid, title, content, tags) VALUES (new.id, new.title, new.content, new.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS lessons_ad AFTER DELETE ON lessons BEGIN
+    INSERT INTO lessons_fts(lessons_fts, rowid, title, content, tags) VALUES ('delete', old.id, old.title, old.content, old.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS lessons_au AFTER UPDATE ON lessons BEGIN
+    INSERT INTO lessons_fts(lessons_fts, rowid, title, content, tags) VALUES ('delete', old.id, old.title, old.content, old.tags);
+    INSERT INTO lessons_fts(rowid, title, content, tags) VALUES (new.id, new.title, new.content, new.tags);
+END;
+
+CREATE INDEX IF NOT EXISTS idx_lessons_category ON lessons(category);
+CREATE INDEX IF NOT EXISTS idx_lessons_project ON lessons(project_path);
+CREATE INDEX IF NOT EXISTS idx_lessons_created ON lessons(created_at);
+CREATE INDEX IF NOT EXISTS idx_lessons_recall_count ON lessons(recall_count);
 `
 
 const noiseFilter = `AND content NOT LIKE '<local-command%' AND content NOT LIKE '<command-name>%' AND content NOT LIKE '[Tool:%'`
@@ -114,6 +153,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("schema init: %w", err)
 	}
 	db.Exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+	db.Exec("INSERT INTO lessons_fts(lessons_fts) VALUES('rebuild')")
 	return db, nil
 }
 
@@ -354,28 +394,50 @@ func getRecentChunks(db *sql.DB, projectPath string, limit int) ([]Chunk, error)
 }
 
 func recall(db *sql.DB, projectPath string, limit int) string {
-	chunks, err := getRecentChunks(db, projectPath, limit)
-	if err != nil || len(chunks) == 0 {
-		return ""
-	}
 	var b strings.Builder
-	b.WriteString("=== yasumem: 過去のセッション記憶 ===\n\n")
-	for _, c := range chunks {
-		t := time.Unix(int64(c.CreatedAt), 0)
-		ts := t.Format("01/02 15:04")
-		role := "Assistant"
-		if c.Role == "user" {
-			role = "User"
+
+	// Part 1: 会話記憶
+	chunks, err := getRecentChunks(db, projectPath, limit)
+	if len(chunks) > 0 && err == nil {
+		b.WriteString("=== yasumem: 過去のセッション記憶 ===\n\n")
+		for _, c := range chunks {
+			t := time.Unix(int64(c.CreatedAt), 0)
+			ts := t.Format("01/02 15:04")
+			role := "Assistant"
+			if c.Role == "user" {
+				role = "User"
+			}
+			branch := ""
+			if c.GitBranch.Valid && c.GitBranch.String != "" {
+				branch = " [" + c.GitBranch.String + "]"
+			}
+			preview := c.Content
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			fmt.Fprintf(&b, "- [%s%s] %s: %s\n", ts, branch, role, preview)
 		}
-		branch := ""
-		if c.GitBranch.Valid && c.GitBranch.String != "" {
-			branch = " [" + c.GitBranch.String + "]"
+	}
+
+	// Part 2: 開発者レッスン
+	lessons, err := recallLessons(db, projectPath, 10)
+	if len(lessons) > 0 && err == nil {
+		b.WriteString("\n=== yasumem: 開発者レッスン ===\n\n")
+		for _, l := range lessons {
+			preview := l.Content
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			line := fmt.Sprintf("- [%s] %s: %s", categoryLabel(l.Category), l.Title, preview)
+			if l.Tags != "" {
+				line += fmt.Sprintf(" (tags: %s)", l.Tags)
+			}
+			b.WriteString(line + "\n")
 		}
-		preview := c.Content
-		if len(preview) > 200 {
-			preview = preview[:200] + "..."
-		}
-		fmt.Fprintf(&b, "- [%s%s] %s: %s\n", ts, branch, role, preview)
+	}
+
+	if b.Len() == 0 {
+		return ""
 	}
 	return b.String()
 }
