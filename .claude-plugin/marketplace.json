@@ -1,0 +1,17 @@
+{
+  "name": "yasumem-marketplace",
+  "owner": {
+    "name": "YasuakiOmokawa"
+  },
+  "metadata": {
+    "description": "セッション間の記憶を永続化・検索するClaude Codeプラグイン"
+  },
+  "plugins": [
+    {
+      "name": "yasumem",
+      "source": ".",
+      "description": "セッション間の記憶を永続化・検索するClaude Codeプラグイン",
+      "version": "0.1.0"
+    }
+  ]
+}

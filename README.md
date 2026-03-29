@@ -1,0 +1,29 @@
+# yasumem
+
+セッション間の記憶を永続化・検索する Claude Code プラグイン。
+
+## 概要
+
+SessionStart フックで直近の会話記憶を自動的にコンテキストに注入し、MCP サーバー経由で記憶の保存・検索を提供する。
+
+- **memory_save**: 会話の要点を永続化
+- **memory_search**: 過去の記憶をキーワード検索
+- **memory_recent**: 直近の記憶を取得
+
+## インストール
+
+### マーケットプレイスから（推奨）
+
+```bash
+# マーケットプレイスを追加
+/plugin marketplace add YasuakiOmokawa/yasumem
+
+# プラグインをインストール
+/plugin install yasumem@yasumem-marketplace
+```
+
+### 直接インストール
+
+```bash
+claude plugin add https://github.com/YasuakiOmokawa/yasumem.git
+```
