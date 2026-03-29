@@ -232,39 +232,82 @@ func applyTimeDecay(chunks []Chunk, halfLifeDays float64) []Chunk {
 	return result
 }
 
-func search(db *sql.DB, query string, limit int, projectFilter string, maxAgeDays int) ([]Chunk, error) {
-	timeFilter := ""
-	var timeArgs []any
+func getRecentChunksBySession(db *sql.DB, projectFilter string, maxAgeDays int, limit int) ([]Chunk, error) {
+	cutoff := float64(0)
 	if maxAgeDays > 0 {
-		cutoff := float64(time.Now().Unix()) - float64(maxAgeDays)*86400
-		timeFilter = "AND created_at > ?"
-		timeArgs = append(timeArgs, cutoff)
+		cutoff = float64(time.Now().Unix()) - float64(maxAgeDays)*86400
 	}
 
+	// Step 1: get sessions
+	var sessRows *sql.Rows
+	var err error
+	if projectFilter != "" {
+		sessRows, err = db.Query(
+			`SELECT session_id, project_path, git_branch, started_at
+			 FROM sessions WHERE started_at > ? AND project_path = ?
+			 ORDER BY started_at DESC`, cutoff, projectFilter)
+	} else {
+		sessRows, err = db.Query(
+			`SELECT session_id, project_path, git_branch, started_at
+			 FROM sessions WHERE started_at > ?
+			 ORDER BY started_at DESC`, cutoff)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer sessRows.Close()
+
+	type sessionInfo struct {
+		ID string
+	}
+	var sessions []sessionInfo
+	for sessRows.Next() {
+		var sid, pp string
+		var gb sql.NullString
+		var sa float64
+		if err := sessRows.Scan(&sid, &pp, &gb, &sa); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, sessionInfo{ID: sid})
+	}
+	if err := sessRows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Step 2: get representative chunks per session
+	perSession := 4
+	var results []Chunk
+	for _, s := range sessions {
+		rows, err := db.Query(
+			fmt.Sprintf(`SELECT id, session_id, project_path, git_branch,
+			        chunk_index, role, content, created_at
+			 FROM chunks WHERE session_id = ? %s
+			 ORDER BY created_at DESC LIMIT ?`, noiseFilter),
+			s.ID, perSession)
+		if err != nil {
+			continue
+		}
+		chunks, err := scanChunks(rows)
+		rows.Close()
+		if err != nil {
+			continue
+		}
+		results = append(results, chunks...)
+		if len(results) >= limit*2 {
+			break
+		}
+	}
+	return results, nil
+}
+
+func search(db *sql.DB, query string, limit int, projectFilter string, maxAgeDays int) ([]Chunk, error) {
 	var results []Chunk
 	var err error
 
 	if query == "" {
-		if projectFilter != "" {
-			results, err = getRecentChunks(db, projectFilter, 20)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if len(results) == 0 {
-			q := fmt.Sprintf(
-				"SELECT id, session_id, project_path, git_branch, chunk_index, role, content, created_at FROM chunks WHERE 1=1 %s %s ORDER BY created_at DESC LIMIT ?",
-				noiseFilter, timeFilter)
-			args := append(timeArgs, 20)
-			rows, err := db.Query(q, args...)
-			if err != nil {
-				return nil, err
-			}
-			defer rows.Close()
-			results, err = scanChunks(rows)
-			if err != nil {
-				return nil, err
-			}
+		results, err = getRecentChunksBySession(db, projectFilter, maxAgeDays, limit)
+		if err != nil {
+			return nil, err
 		}
 	} else if len(query) < 3 {
 		results, err = likeSearch(db, query, 20)
