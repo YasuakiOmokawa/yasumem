@@ -118,22 +118,39 @@ type sessionMeta struct {
 	EndedAt     float64
 }
 
-func parseJsonl(path string) (sessionMeta, []Chunk, error) {
+type parseResult struct {
+	Meta           sessionMeta
+	Chunks         []Chunk
+	BytesRead      int64
+	LastChunkIndex int
+}
+
+func parseJsonlIncremental(path string, byteOffset int64, skipChunkIndex int) parseResult {
 	f, err := os.Open(path)
 	if err != nil {
-		return sessionMeta{}, nil, err
+		return parseResult{}
 	}
 	defer f.Close()
 
+	if byteOffset > 0 {
+		if _, err := f.Seek(byteOffset, 0); err != nil {
+			return parseResult{}
+		}
+	}
+
 	var meta sessionMeta
 	var chunks []Chunk
-	chunkIndex := 0
+	chunkIndex := skipChunkIndex + 1
+	var bytesRead int64
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+		raw := scanner.Bytes()
+		bytesRead += int64(len(raw)) + 1 // +1 for newline
+
+		line := strings.TrimSpace(string(raw))
 		if line == "" {
 			continue
 		}
@@ -190,7 +207,18 @@ func parseJsonl(path string) (sessionMeta, []Chunk, error) {
 			chunkIndex++
 		}
 	}
-	return meta, chunks, scanner.Err()
+
+	lastIdx := skipChunkIndex
+	if len(chunks) > 0 {
+		lastIdx = chunks[len(chunks)-1].ChunkIndex
+	}
+
+	return parseResult{
+		Meta:           meta,
+		Chunks:         chunks,
+		BytesRead:      byteOffset + bytesRead,
+		LastChunkIndex: lastIdx,
+	}
 }
 
 func findJsonl(sessionID, cwd string) string {
@@ -263,10 +291,11 @@ func runIngest() {
 		return
 	}
 
-	meta, chunks, err := parseJsonl(jsonlPath)
-	if err != nil || len(chunks) == 0 {
+	r := parseJsonlIncremental(jsonlPath, 0, -1)
+	if len(r.Chunks) == 0 {
 		return
 	}
+	meta := r.Meta
 
 	if meta.SessionID == "" {
 		meta.SessionID = input.SessionID
@@ -277,8 +306,8 @@ func runIngest() {
 
 	canonical := resolveCanonicalProject(input.Cwd)
 	meta.ProjectPath = canonical
-	for i := range chunks {
-		chunks[i].ProjectPath = canonical
+	for i := range r.Chunks {
+		r.Chunks[i].ProjectPath = canonical
 	}
 
 	startedAt := meta.StartedAt
@@ -293,7 +322,8 @@ func runIngest() {
 	saveSession(db, meta.SessionID, meta.ProjectPath,
 		sql.NullString{String: meta.GitBranch, Valid: meta.GitBranch != ""},
 		startedAt, endedAt)
-	count, _ := saveChunks(db, chunks)
+	count, _ := saveChunks(db, r.Chunks)
+	updateSessionIngestState(db, meta.SessionID, r.BytesRead, r.LastChunkIndex)
 	fmt.Fprintf(os.Stderr, "Saved %d chunks from session %s\n", count, input.SessionID)
 
 }
@@ -401,15 +431,18 @@ func runIngestRecent() {
 	ingested := 0
 	for _, jsonlPath := range findRecentJsonls(worktreePaths, since) {
 		sessionID := strings.TrimSuffix(filepath.Base(jsonlPath), ".jsonl")
-		meta, chunks, err := parseJsonl(jsonlPath)
-		if err != nil || len(chunks) == 0 {
+
+		state := getSessionIngestState(db, sessionID)
+		r := parseJsonlIncremental(jsonlPath, state.ByteOffset, state.ChunkIndex)
+		if len(r.Chunks) == 0 {
 			continue
 		}
+		meta := r.Meta
 		if meta.SessionID == "" {
 			meta.SessionID = sessionID
 		}
-		for i := range chunks {
-			chunks[i].ProjectPath = canonical
+		for i := range r.Chunks {
+			r.Chunks[i].ProjectPath = canonical
 		}
 
 		startedAt := meta.StartedAt
@@ -424,7 +457,8 @@ func runIngestRecent() {
 		saveSession(db, meta.SessionID, canonical,
 			sql.NullString{String: meta.GitBranch, Valid: meta.GitBranch != ""},
 			startedAt, endedAt)
-		count, _ := saveChunks(db, chunks)
+		count, _ := saveChunks(db, r.Chunks)
+		updateSessionIngestState(db, meta.SessionID, r.BytesRead, r.LastChunkIndex)
 		ingested++
 		fmt.Fprintf(os.Stderr, "Ingested %d chunks from %s\n", count, sessionID)
 	}

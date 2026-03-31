@@ -138,6 +138,11 @@ func migrateFtsTokenizer(db *sql.DB) {
 	}
 }
 
+func migrateSessionsAddIngestState(db *sql.DB) {
+	db.Exec("ALTER TABLE sessions ADD COLUMN last_byte_offset INTEGER NOT NULL DEFAULT 0")
+	db.Exec("ALTER TABLE sessions ADD COLUMN last_chunk_index INTEGER NOT NULL DEFAULT -1")
+}
+
 func openDB(dbPath string) (*sql.DB, error) {
 	dir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -148,6 +153,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 	migrateFtsTokenizer(db)
+	migrateSessionsAddIngestState(db)
 	if _, err := db.Exec(schemaSql); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("schema init: %w", err)
@@ -165,6 +171,25 @@ func sessionExists(db *sql.DB, sessionID string) bool {
 	return err == nil
 }
 
+type sessionIngestState struct {
+	ByteOffset int64
+	ChunkIndex int
+}
+
+func getSessionIngestState(db *sql.DB, sessionID string) sessionIngestState {
+	var bo sql.NullInt64
+	var ci sql.NullInt64
+	db.QueryRow("SELECT last_byte_offset, last_chunk_index FROM sessions WHERE session_id = ?", sessionID).Scan(&bo, &ci)
+	state := sessionIngestState{ChunkIndex: -1}
+	if bo.Valid {
+		state.ByteOffset = bo.Int64
+	}
+	if ci.Valid {
+		state.ChunkIndex = int(ci.Int64)
+	}
+	return state
+}
+
 func saveSession(db *sql.DB, sessionID, projectPath string, gitBranch sql.NullString, startedAt float64, endedAt sql.NullFloat64) error {
 	_, err := db.Exec(
 		`INSERT INTO sessions (session_id, project_path, git_branch, started_at, ended_at)
@@ -173,6 +198,13 @@ func saveSession(db *sql.DB, sessionID, projectPath string, gitBranch sql.NullSt
 		sessionID, projectPath, gitBranch, startedAt, endedAt,
 	)
 	return err
+}
+
+func updateSessionIngestState(db *sql.DB, sessionID string, byteOffset int64, chunkIndex int) {
+	db.Exec(
+		`UPDATE sessions SET last_byte_offset = ?, last_chunk_index = ? WHERE session_id = ?`,
+		byteOffset, chunkIndex, sessionID,
+	)
 }
 
 func saveChunks(db *sql.DB, chunks []Chunk) (int, error) {
