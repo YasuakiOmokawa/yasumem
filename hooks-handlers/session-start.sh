@@ -15,10 +15,7 @@ if [ -n "$CWD" ]; then
     echo "$CANONICAL" > "$PLUGIN_ROOT/data/current_project"
 fi
 
-# 1. Ingest recent unprocessed sessions (sync, so recall sees new data)
+# 1. Ingest recent unprocessed sessions
 echo "$INPUT" | YASUMEM_DB="$PLUGIN_ROOT/data/memory.db" "$BIN" ingest-recent >> "$LOG_DIR/ingest.log" 2>&1 || true
-
-# 2. Recall memories (returns context to Claude)
-echo "$INPUT" | YASUMEM_DB="$PLUGIN_ROOT/data/memory.db" "$BIN" recall 2>/dev/null || true
 
 exit 0

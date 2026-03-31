@@ -224,23 +224,6 @@ func incrementRecallCount(db *sql.DB, ids []int64) {
 	db.Exec(query, args...)
 }
 
-func recallLessons(db *sql.DB, projectPath string, limit int) ([]Lesson, error) {
-	rows, err := db.Query(
-		`SELECT id, category, title, content, project_path, tags, source, source_ref, recall_count, created_at, updated_at
-		 FROM lessons
-		 WHERE project_path = ? OR project_path = ''
-		 ORDER BY
-		     CASE WHEN project_path != '' THEN 0 ELSE 1 END,
-		     recall_count DESC,
-		     created_at DESC
-		 LIMIT ?`, projectPath, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanLessons(rows)
-}
-
 func categoryLabel(category string) string {
 	switch category {
 	case "review_feedback":
@@ -256,4 +239,91 @@ func categoryLabel(category string) string {
 	default:
 		return category
 	}
+}
+
+func searchLessonsByTag(db *sql.DB, tag, projectPath string, limit int) ([]Lesson, error) {
+	rows, err := db.Query(
+		`SELECT id, category, title, content, project_path, tags, source, source_ref, recall_count, created_at, updated_at
+		 FROM lessons
+		 WHERE tags LIKE ?
+		 AND (project_path = ? OR project_path = '')
+		 ORDER BY recall_count DESC, created_at DESC LIMIT ?`,
+		"%"+tag+"%", projectPath, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanLessons(rows)
+}
+
+// extractSearchSegments splits text into overlapping rune-based segments
+// for trigram-friendly FTS5 search. Full strings don't match paraphrased text,
+// but short segments (e.g. "設計に固") can match across similar titles.
+func extractSearchSegments(text string, segLen int) []string {
+	runes := []rune(text)
+	if len(runes) <= segLen {
+		if len(runes) >= 3 {
+			return []string{text}
+		}
+		return nil
+	}
+	var segments []string
+	step := segLen
+	for i := 0; i+segLen <= len(runes); i += step {
+		segments = append(segments, string(runes[i:i+segLen]))
+	}
+	return segments
+}
+
+func findSimilarLessons(db *sql.DB, title, content, projectPath string, excludeID int64, limit int) ([]Lesson, error) {
+	var results []Lesson
+	seen := map[int64]bool{excludeID: true}
+
+	// Search with short segments of the title (5 runes each)
+	segments := extractSearchSegments(title, 5)
+	for _, seg := range segments {
+		candidates, err := fts5SearchLessons(db, seg, limit*3)
+		if err == nil {
+			for _, l := range candidates {
+				if !seen[l.ID] {
+					seen[l.ID] = true
+					results = append(results, l)
+				}
+			}
+		}
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	// Fallback: search with content segments if not enough results
+	if len(results) < limit {
+		contentSegments := extractSearchSegments(content, 5)
+		for _, seg := range contentSegments {
+			candidates, err := fts5SearchLessons(db, seg, limit*3)
+			if err == nil {
+				for _, l := range candidates {
+					if !seen[l.ID] {
+						seen[l.ID] = true
+						results = append(results, l)
+					}
+				}
+			}
+			if len(results) >= limit {
+				break
+			}
+		}
+	}
+
+	filtered := results[:0]
+	for _, l := range results {
+		if projectPath == "" || l.ProjectPath == "" || l.ProjectPath == projectPath {
+			filtered = append(filtered, l)
+		}
+	}
+
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
 }

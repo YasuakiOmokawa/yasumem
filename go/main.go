@@ -27,7 +27,7 @@ func getCurrentProject() string {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: yasumem <server|ingest|ingest-recent|recall>")
+		fmt.Fprintln(os.Stderr, "usage: yasumem <server|ingest|ingest-recent>")
 		os.Exit(1)
 	}
 	switch os.Args[1] {
@@ -37,8 +37,6 @@ func main() {
 		runIngest()
 	case "ingest-recent":
 		runIngestRecent()
-	case "recall":
-		runRecall()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
 		os.Exit(1)

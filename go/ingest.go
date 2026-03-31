@@ -15,7 +15,6 @@ import (
 )
 
 const maxChunkLength = 2000
-const maxSessionsPerWorktree = 3
 
 var claudeProjectsDir = filepath.Join(os.Getenv("HOME"), ".claude", "projects")
 
@@ -323,7 +322,7 @@ type jsonlFile struct {
 	modTime time.Time
 }
 
-func findRecentJsonls(worktreePaths []string) []string {
+func findRecentJsonls(worktreePaths []string, since time.Time) []string {
 	var all []jsonlFile
 	for _, wt := range worktreePaths {
 		encoded := encodeCwd(wt)
@@ -338,6 +337,9 @@ func findRecentJsonls(worktreePaths []string) []string {
 				if err != nil {
 					continue
 				}
+				if !since.IsZero() && !info.ModTime().After(since) {
+					continue
+				}
 				all = append(all, jsonlFile{
 					path:    filepath.Join(projectDir, e.Name()),
 					modTime: info.ModTime(),
@@ -347,13 +349,31 @@ func findRecentJsonls(worktreePaths []string) []string {
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].modTime.After(all[j].modTime) })
 	var result []string
-	for i, f := range all {
-		if i >= maxSessionsPerWorktree {
-			break
-		}
+	for _, f := range all {
 		result = append(result, f.path)
 	}
 	return result
+}
+
+func lastIngestAtPath() string {
+	exe, _ := os.Executable()
+	return filepath.Join(filepath.Dir(exe), "..", "data", "last_ingest_at")
+}
+
+func readLastIngestAt() time.Time {
+	b, err := os.ReadFile(lastIngestAtPath())
+	if err != nil {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(b)))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+func writeLastIngestAt(t time.Time) {
+	os.WriteFile(lastIngestAtPath(), []byte(t.Format(time.RFC3339)+"\n"), 0o644)
 }
 
 func runIngestRecent() {
@@ -375,8 +395,11 @@ func runIngestRecent() {
 	}
 	defer db.Close()
 
+	since := readLastIngestAt()
+	now := time.Now()
+
 	ingested := 0
-	for _, jsonlPath := range findRecentJsonls(worktreePaths) {
+	for _, jsonlPath := range findRecentJsonls(worktreePaths, since) {
 		sessionID := strings.TrimSuffix(filepath.Base(jsonlPath), ".jsonl")
 		meta, chunks, err := parseJsonl(jsonlPath)
 		if err != nil || len(chunks) == 0 {
@@ -406,4 +429,5 @@ func runIngestRecent() {
 		fmt.Fprintf(os.Stderr, "Ingested %d chunks from %s\n", count, sessionID)
 	}
 
+	writeLastIngestAt(now)
 }
