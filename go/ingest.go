@@ -71,8 +71,18 @@ var ingestNoisePrefixes = []string{
 	"<functions>",
 	"<local-command",
 	"<command-name>",
+	"<local-command-caveat>",
+	"<local-command-stdout>",
+	"<usage>",
+	"<task-notification>",
 	"Tool loaded.",
 }
+
+var toolOnlyRe = regexp.MustCompile(`^(\[Tool:\s*\w+\]\s*)+$`)
+
+const minChunkRunes = 15
+const maxChunkRunes = 1000
+const truncateToRunes = 500
 
 func isNoiseContent(text string) bool {
 	trimmed := strings.TrimSpace(text)
@@ -81,7 +91,21 @@ func isNoiseContent(text string) bool {
 			return true
 		}
 	}
+	if toolOnlyRe.MatchString(trimmed) {
+		return true
+	}
+	if len([]rune(trimmed)) < minChunkRunes {
+		return true
+	}
 	return false
+}
+
+func truncateChunk(text string) string {
+	runes := []rune(text)
+	if len(runes) > maxChunkRunes {
+		return string(runes[:truncateToRunes]) + "...(省略)"
+	}
+	return text
 }
 
 var sentenceSplitRe = regexp.MustCompile(`[。.!?！？\n]`)
@@ -217,6 +241,10 @@ func parseJsonlIncremental(path string, byteOffset int64, skipChunkIndex int) pa
 		}
 
 		for _, part := range splitChunk(text) {
+			part = truncateChunk(part)
+			if isNoiseContent(part) {
+				continue
+			}
 			chunks = append(chunks, Chunk{
 				SessionID:   meta.SessionID,
 				ProjectPath: meta.ProjectPath,
