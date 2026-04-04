@@ -26,15 +26,17 @@ func runServer() {
 	// memory_search
 	s.AddTool(
 		mcp.NewTool("memory_search",
-			mcp.WithDescription("過去のセッション記憶をハイブリッド検索する。キーワードで過去の議論や決定事項を検索。デフォルトはカレントプロジェクトのみ。all_projects=trueで全プロジェクト横断検索。"),
-			mcp.WithString("query", mcp.Required(), mcp.Description("検索キーワード")),
-			mcp.WithNumber("limit", mcp.Description("結果件数上限（デフォルト5）")),
+			mcp.WithDescription("過去のセッション記憶を検索する。キーワード検索、日数指定、または両方を組み合わせて使用。デフォルトはカレントプロジェクトのみ。all_projects=trueで全プロジェクト横断検索。"),
+			mcp.WithString("query", mcp.Description("検索キーワード（省略時は直近の記憶を時系列で取得）")),
+			mcp.WithNumber("days", mcp.Description("取得日数でフィルタ（例: 7で直近7日間）")),
+			mcp.WithNumber("limit", mcp.Description("結果件数上限（デフォルト10）")),
 			mcp.WithString("project_filter", mcp.Description("プロジェクトパスでフィルタ")),
 			mcp.WithBoolean("all_projects", mcp.Description("全プロジェクト横断検索（デフォルトfalse）")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			query := req.GetString("query", "")
-			limit := int(req.GetFloat("limit", 5))
+			days := int(req.GetFloat("days", 0))
+			limit := int(req.GetFloat("limit", 10))
 			projectFilter := req.GetString("project_filter", "")
 			allProjects := req.GetBool("all_projects", false)
 
@@ -42,7 +44,7 @@ func runServer() {
 				projectFilter = getCurrentProject()
 			}
 
-			results, err := search(db, query, limit, projectFilter, 0)
+			results, err := search(db, query, limit, projectFilter, days)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -84,50 +86,6 @@ func runServer() {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("記憶を保存しました (id: %d)", id)), nil
-		},
-	)
-
-	// memory_recent
-	s.AddTool(
-		mcp.NewTool("memory_recent",
-			mcp.WithDescription("直近の記憶一覧を取得する。最近のセッションで何を議論したか確認。デフォルトはカレントプロジェクトのみ。all_projects=trueで全プロジェクト横断。"),
-			mcp.WithNumber("days", mcp.Description("取得日数（デフォルト7）")),
-			mcp.WithNumber("limit", mcp.Description("結果件数上限（デフォルト10）")),
-			mcp.WithBoolean("all_projects", mcp.Description("全プロジェクト横断（デフォルトfalse）")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			days := int(req.GetFloat("days", 7))
-			limit := int(req.GetFloat("limit", 10))
-			allProjects := req.GetBool("all_projects", false)
-
-			projectFilter := ""
-			if !allProjects {
-				projectFilter = getCurrentProject()
-			}
-
-			results, err := search(db, "", limit, projectFilter, days)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if len(results) == 0 {
-				return mcp.NewToolResultText("直近の記憶がありません。"), nil
-			}
-
-			var lines []string
-			for _, c := range results {
-				t := time.Unix(int64(c.CreatedAt), 0)
-				ts := t.Format("2006-01-02 15:04")
-				role := "Assistant"
-				if c.Role == "user" {
-					role = "User"
-				}
-				preview := c.Content
-				if len(preview) > 150 {
-					preview = preview[:150] + "..."
-				}
-				lines = append(lines, fmt.Sprintf("[%s] %s: %s", ts, role, preview))
-			}
-			return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
 		},
 	)
 
