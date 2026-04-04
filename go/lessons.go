@@ -138,7 +138,7 @@ func listLessons(db *sql.DB, projectPath, category string, limit int) ([]Lesson,
 		args = append(args, category)
 	}
 
-	query += " ORDER BY recall_count DESC, created_at DESC LIMIT ?"
+	query += " LIMIT ?"
 	args = append(args, limit)
 
 	rows, err := db.Query(query, args...)
@@ -149,7 +149,7 @@ func listLessons(db *sql.DB, projectPath, category string, limit int) ([]Lesson,
 	return scanLessons(rows)
 }
 
-func searchLessons(db *sql.DB, query, projectPath, category string, limit int) ([]Lesson, error) {
+func searchLessons(db *sql.DB, query, projectPath, category, tags, source string, limit int) ([]Lesson, error) {
 	var results []Lesson
 	var err error
 
@@ -165,6 +165,17 @@ func searchLessons(db *sql.DB, query, projectPath, category string, limit int) (
 		return nil, err
 	}
 
+	// Parse tags filter into individual tags for OR matching
+	var tagFilters []string
+	if tags != "" {
+		for _, t := range strings.Split(tags, ",") {
+			t = strings.TrimSpace(strings.ToLower(t))
+			if t != "" {
+				tagFilters = append(tagFilters, t)
+			}
+		}
+	}
+
 	// Apply filters
 	filtered := results[:0]
 	for _, l := range results {
@@ -173,6 +184,21 @@ func searchLessons(db *sql.DB, query, projectPath, category string, limit int) (
 		}
 		if category != "" && l.Category != category {
 			continue
+		}
+		if source != "" && l.Source != source {
+			continue
+		}
+		if len(tagFilters) > 0 {
+			matched := false
+			for _, tf := range tagFilters {
+				if strings.Contains(strings.ToLower(l.Tags), tf) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		filtered = append(filtered, l)
 	}
@@ -200,7 +226,7 @@ func likeSearchLessons(db *sql.DB, query string, limit int) ([]Lesson, error) {
 	rows, err := db.Query(
 		`SELECT id, category, title, content, project_path, tags, source, source_ref, recall_count, created_at, updated_at
 		 FROM lessons WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
-		 ORDER BY recall_count DESC, created_at DESC LIMIT ?`,
+		 LIMIT ?`,
 		pattern, pattern, pattern, limit)
 	if err != nil {
 		return nil, err
@@ -247,7 +273,7 @@ func searchLessonsByTag(db *sql.DB, tag, projectPath string, limit int) ([]Lesso
 		 FROM lessons
 		 WHERE tags LIKE ?
 		 AND (project_path = ? OR project_path = '')
-		 ORDER BY recall_count DESC, created_at DESC LIMIT ?`,
+		 LIMIT ?`,
 		"%"+tag+"%", projectPath, limit)
 	if err != nil {
 		return nil, err

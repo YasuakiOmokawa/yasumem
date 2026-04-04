@@ -157,6 +157,8 @@ func runServer() {
 			mcp.WithDescription("保存した開発者レッスンをキーワード検索する。過去のレビュー指摘や設計判断を検索。デフォルトはカレントプロジェクト+グローバルレッスン。"),
 			mcp.WithString("query", mcp.Required(), mcp.Description("検索キーワード")),
 			mcp.WithString("category", mcp.Description("カテゴリでフィルタ: review_feedback, design_decision, lesson_learned, pattern, mistake")),
+			mcp.WithString("tags", mcp.Description("タグでフィルタ（カンマ区切りで複数指定時はOR検索。例: rails,activerecord）")),
+			mcp.WithString("source", mcp.Description("記録元でフィルタ: pr_review, manual, session等")),
 			mcp.WithBoolean("all_projects", mcp.Description("全プロジェクト横断検索（デフォルトfalse）")),
 			mcp.WithNumber("limit", mcp.Description("結果件数上限（デフォルト10）")),
 		),
@@ -166,6 +168,8 @@ func runServer() {
 				return mcp.NewToolResultError("query is required"), nil
 			}
 			category := req.GetString("category", "")
+			tags := req.GetString("tags", "")
+			source := req.GetString("source", "")
 			allProjects := req.GetBool("all_projects", false)
 			limit := int(req.GetFloat("limit", 10))
 
@@ -174,7 +178,7 @@ func runServer() {
 				projectPath = getCurrentProject()
 			}
 
-			results, err := searchLessons(db, query, projectPath, category, limit)
+			results, err := searchLessons(db, query, projectPath, category, tags, source, limit)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -286,109 +290,6 @@ func runServer() {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("レッスン %d を更新しました", id)), nil
-		},
-	)
-
-	// lesson_patterns
-	s.AddTool(
-		mcp.NewTool("lesson_patterns",
-			mcp.WithDescription("思考パターン・行動傾向を可視化する。「自分の癖を教えて」と聞かれた時に使う。context指定時は過去のセッション記憶も検索してインサイトの材料を返す。context省略時は保存済みパターンのみ返す。"),
-			mcp.WithString("context", mcp.Description("現在取り組んでいる内容のキーワード。例: 設計, レビュー, リファクタ")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			contextQuery := req.GetString("context", "")
-			projectPath := getCurrentProject()
-
-			var b strings.Builder
-
-			// Part 1: 保存済みメタ認知パターン
-			patterns, _ := searchLessonsByTag(db, "メタ認知", projectPath, 20)
-			if len(patterns) > 0 {
-				var warnings, strengths []Lesson
-				for _, l := range patterns {
-					if strings.Contains(l.Tags, "強み") {
-						strengths = append(strengths, l)
-					} else {
-						warnings = append(warnings, l)
-					}
-				}
-
-				b.WriteString("=== 保存済みパターン ===\n\n")
-
-				if len(warnings) > 0 {
-					b.WriteString("■ 注意すべきパターン\n")
-					for _, l := range warnings {
-						preview := l.Content
-						if len(preview) > 200 {
-							preview = preview[:200] + "..."
-						}
-						t := time.Unix(int64(l.UpdatedAt), 0)
-						fmt.Fprintf(&b, "  [id:%d] [参照%d回] %s\n    %s\n    tags: %s | 最終更新: %s\n\n",
-							l.ID, l.RecallCount, l.Title, preview, l.Tags, t.Format("2006-01-02"))
-					}
-				}
-				if len(strengths) > 0 {
-					b.WriteString("■ 活かすべき強み\n")
-					for _, l := range strengths {
-						preview := l.Content
-						if len(preview) > 200 {
-							preview = preview[:200] + "..."
-						}
-						t := time.Unix(int64(l.UpdatedAt), 0)
-						fmt.Fprintf(&b, "  [id:%d] [参照%d回] %s\n    %s\n    tags: %s | 最終更新: %s\n\n",
-							l.ID, l.RecallCount, l.Title, preview, l.Tags, t.Format("2006-01-02"))
-					}
-				}
-
-				// 統計
-				tagCount := map[string]int{}
-				for _, l := range patterns {
-					for _, tag := range strings.Split(l.Tags, ",") {
-						tag = strings.TrimSpace(tag)
-						if tag != "" {
-							tagCount[tag]++
-						}
-					}
-				}
-				fmt.Fprintf(&b, "=== 統計 ===\nパターン総数: %d件", len(patterns))
-				if len(tagCount) > 0 {
-					b.WriteString(" | タグ: ")
-					first := true
-					for tag, count := range tagCount {
-						if !first {
-							b.WriteString(", ")
-						}
-						fmt.Fprintf(&b, "%s(%d)", tag, count)
-						first = false
-					}
-				}
-				b.WriteString("\n")
-			} else {
-				b.WriteString("保存済みパターンはありません。\n")
-			}
-
-			// Part 2: セッション記憶からのインサイト材料（context指定時のみ）
-			if contextQuery != "" {
-				memories, _ := search(db, contextQuery, 10, projectPath, 0)
-				if len(memories) > 0 {
-					b.WriteString("\n=== 関連セッション記憶 ===\n\n")
-					for _, c := range memories {
-						t := time.Unix(int64(c.CreatedAt), 0)
-						ts := t.Format("2006-01-02 15:04")
-						role := "Assistant"
-						if c.Role == "user" {
-							role = "User"
-						}
-						branch := ""
-						if c.GitBranch.Valid && c.GitBranch.String != "" {
-							branch = " [" + c.GitBranch.String + "]"
-						}
-						fmt.Fprintf(&b, "[%s%s] %s:\n%s\n\n", ts, branch, role, c.Content)
-					}
-				}
-			}
-
-			return mcp.NewToolResultText(b.String()), nil
 		},
 	)
 

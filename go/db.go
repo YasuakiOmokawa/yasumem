@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,7 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_lessons_created ON lessons(created_at);
 CREATE INDEX IF NOT EXISTS idx_lessons_recall_count ON lessons(recall_count);
 `
 
-const noiseFilter = `AND content NOT LIKE '<local-command%' AND content NOT LIKE '<command-name>%' AND content NOT LIKE '[Tool:%'`
+const noiseFilter = `AND content NOT LIKE '<local-command%' AND content NOT LIKE '<command-name>%' AND content NOT LIKE '[Tool:%' AND content NOT LIKE '<system-reminder>%' AND content NOT LIKE '<available-deferred-tools>%' AND content NOT LIKE 'Tool loaded.%' AND content NOT LIKE '<functions>%'`
 
 type Chunk struct {
 	ID          int64
@@ -278,31 +277,6 @@ func likeSearch(db *sql.DB, query string, limit int) ([]Chunk, error) {
 	return scanChunks(rows)
 }
 
-func applyTimeDecay(chunks []Chunk, halfLifeDays float64) []Chunk {
-	now := float64(time.Now().Unix())
-	type scored struct {
-		chunk Chunk
-		score float64
-	}
-	ss := make([]scored, len(chunks))
-	for i, c := range chunks {
-		ageDays := (now - c.CreatedAt) / 86400
-		ss[i] = scored{c, math.Pow(0.5, ageDays/halfLifeDays)}
-	}
-	// sort descending by score
-	for i := 0; i < len(ss); i++ {
-		for j := i + 1; j < len(ss); j++ {
-			if ss[j].score > ss[i].score {
-				ss[i], ss[j] = ss[j], ss[i]
-			}
-		}
-	}
-	result := make([]Chunk, len(ss))
-	for i, s := range ss {
-		result[i] = s.chunk
-	}
-	return result
-}
 
 func recentChunks(db *sql.DB, projectFilter string, maxAgeDays int, limit int) ([]Chunk, error) {
 	q := fmt.Sprintf(`SELECT id, session_id, project_path, git_branch,
@@ -379,7 +353,6 @@ func search(db *sql.DB, query string, limit int, projectFilter string, maxAgeDay
 		results = filtered
 	}
 
-	results = applyTimeDecay(results, 30.0)
 	if len(results) > limit {
 		results = results[:limit]
 	}

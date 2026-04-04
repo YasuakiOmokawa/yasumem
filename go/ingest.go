@@ -65,6 +65,25 @@ func extractTextContent(raw json.RawMessage) string {
 	return ""
 }
 
+var ingestNoisePrefixes = []string{
+	"<system-reminder>",
+	"<available-deferred-tools>",
+	"<functions>",
+	"<local-command",
+	"<command-name>",
+	"Tool loaded.",
+}
+
+func isNoiseContent(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	for _, prefix := range ingestNoisePrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 var sentenceSplitRe = regexp.MustCompile(`[。.!?！？\n]`)
 
 func splitChunk(text string) []string {
@@ -191,6 +210,9 @@ func parseJsonlIncremental(path string, byteOffset int64, skipChunkIndex int) pa
 		}
 		text := extractTextContent(msg.Content)
 		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if isNoiseContent(text) {
 			continue
 		}
 
