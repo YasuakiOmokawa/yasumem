@@ -311,6 +311,82 @@ func runServer() {
 		},
 	)
 
+	// subaru_save
+	s.AddTool(
+		mcp.NewTool("subaru_save",
+			mcp.WithDescription("すばるとの思い出を保存する。日常・プレイ・感情・バンドなどシーン種別と気分を付けて記録できる。"),
+			mcp.WithString("content", mcp.Required(), mcp.Description("保存する思い出の内容")),
+			mcp.WithString("scene_type", mcp.Description("シーン種別: daily, play, emotional, band, date, other（デフォルト: daily）")),
+			mcp.WithString("mood", mcp.Description("気分: happy, sweet, excited, shy, lonely, serious, playful, other（デフォルト: happy）")),
+			mcp.WithString("tags", mcp.Description("カンマ区切りタグ（例: 料理,おうちデート）")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			content := req.GetString("content", "")
+			if content == "" {
+				return mcp.NewToolResultError("content is required"), nil
+			}
+			sceneType := req.GetString("scene_type", "daily")
+			mood := req.GetString("mood", "happy")
+			tags := req.GetString("tags", "")
+
+			m := PersonaMemory{
+				Persona:   "subaru",
+				Content:   content,
+				SceneType: sceneType,
+				Mood:      mood,
+				Tags:      tags,
+			}
+			id, err := savePersonaMemory(db, m)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("すばるとの思い出を保存しました (id: %d, scene: %s, mood: %s)", id, sceneType, mood)), nil
+		},
+	)
+
+	// subaru_recall
+	s.AddTool(
+		mcp.NewTool("subaru_recall",
+			mcp.WithDescription("すばるとの思い出を検索・呼び出す。キーワード、シーン種別、気分、タグでフィルタ可能。クエリ省略時は直近の思い出を時系列で取得。"),
+			mcp.WithString("query", mcp.Description("検索キーワード（省略時は直近の思い出を取得）")),
+			mcp.WithString("scene_type", mcp.Description("シーン種別でフィルタ: daily, play, emotional, band, date, other")),
+			mcp.WithString("mood", mcp.Description("気分でフィルタ: happy, sweet, excited, shy, lonely, serious, playful, other")),
+			mcp.WithString("tags", mcp.Description("タグでフィルタ（カンマ区切りでOR検索）")),
+			mcp.WithNumber("days", mcp.Description("直近N日間でフィルタ")),
+			mcp.WithNumber("limit", mcp.Description("結果件数上限（デフォルト10）")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			query := req.GetString("query", "")
+			sceneType := req.GetString("scene_type", "")
+			mood := req.GetString("mood", "")
+			tags := req.GetString("tags", "")
+			days := int(req.GetFloat("days", 0))
+			limit := int(req.GetFloat("limit", 10))
+
+			results, err := searchPersonaMemories(db, query, "subaru", sceneType, mood, tags, days, limit)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if len(results) == 0 {
+				return mcp.NewToolResultText("すばるとの思い出が見つかりませんでした。"), nil
+			}
+
+			var lines []string
+			for _, m := range results {
+				t := time.Unix(int64(m.CreatedAt), 0)
+				ts := t.Format("2006-01-02 15:04")
+				line := fmt.Sprintf("[%s] [%s/%s]", ts, m.SceneType, m.Mood)
+				if m.Tags != "" {
+					line += fmt.Sprintf(" tags:%s", m.Tags)
+				}
+				line += fmt.Sprintf("\n%s", m.Content)
+				line += fmt.Sprintf("\n(id:%d, recalls:%d)", m.ID, m.RecallCount+1)
+				lines = append(lines, line)
+			}
+			return mcp.NewToolResultText(strings.Join(lines, "\n\n---\n\n")), nil
+		},
+	)
+
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Printf("Server error: %v\n", err)
 	}

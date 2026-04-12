@@ -99,6 +99,42 @@ CREATE INDEX IF NOT EXISTS idx_lessons_category ON lessons(category);
 CREATE INDEX IF NOT EXISTS idx_lessons_project ON lessons(project_path);
 CREATE INDEX IF NOT EXISTS idx_lessons_created ON lessons(created_at);
 CREATE INDEX IF NOT EXISTS idx_lessons_recall_count ON lessons(recall_count);
+
+CREATE TABLE IF NOT EXISTS persona_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    persona TEXT NOT NULL DEFAULT 'subaru',
+    content TEXT NOT NULL,
+    scene_type TEXT NOT NULL DEFAULT '',
+    mood TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
+    recall_count INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS persona_memories_fts USING fts5(
+    content, tags,
+    content=persona_memories,
+    content_rowid=id,
+    tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS persona_memories_ai AFTER INSERT ON persona_memories BEGIN
+    INSERT INTO persona_memories_fts(rowid, content, tags) VALUES (new.id, new.content, new.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS persona_memories_ad AFTER DELETE ON persona_memories BEGIN
+    INSERT INTO persona_memories_fts(persona_memories_fts, rowid, content, tags) VALUES ('delete', old.id, old.content, old.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS persona_memories_au AFTER UPDATE ON persona_memories BEGIN
+    INSERT INTO persona_memories_fts(persona_memories_fts, rowid, content, tags) VALUES ('delete', old.id, old.content, old.tags);
+    INSERT INTO persona_memories_fts(rowid, content, tags) VALUES (new.id, new.content, new.tags);
+END;
+
+CREATE INDEX IF NOT EXISTS idx_persona_memories_persona ON persona_memories(persona);
+CREATE INDEX IF NOT EXISTS idx_persona_memories_scene_type ON persona_memories(scene_type);
+CREATE INDEX IF NOT EXISTS idx_persona_memories_created ON persona_memories(created_at);
 `
 
 const noiseFilter = `AND content NOT LIKE '<local-command%' AND content NOT LIKE '<command-name>%' AND content NOT LIKE '[Tool:%' AND content NOT LIKE '<system-reminder>%' AND content NOT LIKE '<available-deferred-tools>%' AND content NOT LIKE 'Tool loaded.%' AND content NOT LIKE '<functions>%'`
@@ -159,6 +195,7 @@ func openDB(dbPath string) (*sql.DB, error) {
 	}
 	db.Exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
 	db.Exec("INSERT INTO lessons_fts(lessons_fts) VALUES('rebuild')")
+	db.Exec("INSERT INTO persona_memories_fts(persona_memories_fts) VALUES('rebuild')")
 	return db, nil
 }
 
