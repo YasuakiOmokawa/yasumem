@@ -1,7 +1,10 @@
-bin/
+bin/*
+!bin/yasumem
 data/*.db
 data/*.db-wal
 data/*.db-shm
 data/current_project
 data/last_ingest_at
 data/logs/
+ts/node_modules/
+ts/dist/
