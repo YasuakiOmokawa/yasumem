@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 
 function pluginRoot(): string {
-  return join(here, "..", "..", "..");
+  return join(here, "..", "..");
 }
 
 export function getDBPath(): string {
