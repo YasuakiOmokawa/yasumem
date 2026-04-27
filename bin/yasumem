@@ -2,4 +2,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Pin Node.js version so the prebuilt better-sqlite3 binary in this plugin's
+# node_modules stays compatible regardless of the caller's cwd / asdf shim.
+export ASDF_NODEJS_VERSION="${YASUMEM_NODE_VERSION:-24.13.0}"
 exec node "$PLUGIN_ROOT/ts/dist/index.js" "$@"
