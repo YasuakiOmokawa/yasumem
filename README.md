@@ -8,7 +8,7 @@
 
 - `memory_save` / `memory_search` — 会話の保存・検索
 - `lesson_save` / `lesson_search` / `lesson_list` / `lesson_update` / `lesson_delete` — 開発レッスンの管理
-- `subaru_save` / `subaru_recall` — ペルソナ（すばる）との思い出
+- `persona_save` / `persona_recall` — ペルソナとの思い出（persona未指定時は subaru）
 
 ## インストール
 

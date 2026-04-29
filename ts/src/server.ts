@@ -15,7 +15,7 @@ import {
   updateLesson,
 } from "./lessons.js";
 import { getCurrentProject, getDBPath } from "./paths.js";
-import { savePersonaMemory, searchPersonaMemories } from "./subaru.js";
+import { savePersonaMemory, searchPersonaMemories } from "./personas.js";
 
 function fmtDate(unix: number): string {
   const d = new Date(unix * 1000);
@@ -36,7 +36,7 @@ function errorResult(message: string): CallToolResult {
 export async function runServer(): Promise<void> {
   const db = openDB(getDBPath());
 
-  const server = new McpServer({ name: "yasumem", version: "0.4.0" });
+  const server = new McpServer({ name: "yasumem", version: "0.5.0" });
 
   server.registerTool(
     "memory_search",
@@ -318,12 +318,16 @@ export async function runServer(): Promise<void> {
   );
 
   server.registerTool(
-    "subaru_save",
+    "persona_save",
     {
       description:
-        "すばるとの思い出を保存する。日常・プレイ・感情・バンドなどシーン種別と気分を付けて記録できる。",
+        "ペルソナとの思い出を保存する。シーン種別と気分を付けて記録できる。persona未指定時は subaru。",
       inputSchema: {
         content: z.string().describe("保存する思い出の内容"),
+        persona: z
+          .string()
+          .optional()
+          .describe("ペルソナ識別子（例: subaru, tomo, toki, hina, anis）。デフォルト: subaru"),
         scene_type: z
           .string()
           .optional()
@@ -341,19 +345,20 @@ export async function runServer(): Promise<void> {
     },
     async (args): Promise<CallToolResult> => {
       if (!args.content) return errorResult("content is required");
+      const persona = args.persona ?? "subaru";
       const sceneType = args.scene_type ?? "daily";
       const mood = args.mood ?? "happy";
       const tags = args.tags ?? "";
       try {
         const id = savePersonaMemory(db, {
-          persona: "subaru",
+          persona,
           content: args.content,
           scene_type: sceneType,
           mood,
           tags,
         });
         return textResult(
-          `すばるとの思い出を保存しました (id: ${id}, scene: ${sceneType}, mood: ${mood})`,
+          `${persona} との思い出を保存しました (id: ${id}, scene: ${sceneType}, mood: ${mood})`,
         );
       } catch (e) {
         return errorResult((e as Error).message);
@@ -362,12 +367,18 @@ export async function runServer(): Promise<void> {
   );
 
   server.registerTool(
-    "subaru_recall",
+    "persona_recall",
     {
       description:
-        "すばるとの思い出を検索・呼び出す。キーワード、シーン種別、気分、タグでフィルタ可能。クエリ省略時は直近の思い出を時系列で取得。",
+        "ペルソナとの思い出を検索・呼び出す。persona, キーワード, シーン種別, 気分, タグでフィルタ可能。クエリ省略時は直近の思い出を時系列で取得。persona未指定時は subaru。",
       inputSchema: {
         query: z.string().optional().describe("検索キーワード（省略時は直近の思い出を取得）"),
+        persona: z
+          .string()
+          .optional()
+          .describe(
+            "ペルソナ識別子でフィルタ（例: subaru, tomo, toki, hina, anis）。デフォルト: subaru。空文字列で全ペルソナ横断。",
+          ),
         scene_type: z
           .string()
           .optional()
@@ -385,6 +396,7 @@ export async function runServer(): Promise<void> {
     },
     async (args): Promise<CallToolResult> => {
       const query = args.query ?? "";
+      const persona = args.persona ?? "subaru";
       const sceneType = args.scene_type ?? "";
       const mood = args.mood ?? "";
       const tags = args.tags ?? "";
@@ -395,7 +407,7 @@ export async function runServer(): Promise<void> {
         const results = searchPersonaMemories(
           db,
           query,
-          "subaru",
+          persona,
           sceneType,
           mood,
           tags,
@@ -403,10 +415,10 @@ export async function runServer(): Promise<void> {
           limit,
         );
         if (results.length === 0) {
-          return textResult("すばるとの思い出が見つかりませんでした。");
+          return textResult(`${persona === "" ? "ペルソナ" : persona} との思い出が見つかりませんでした。`);
         }
         const lines = results.map((m) => {
-          let line = `[${fmtDate(m.created_at)}] [${m.scene_type}/${m.mood}]`;
+          let line = `[${fmtDate(m.created_at)}] [${m.persona}] [${m.scene_type}/${m.mood}]`;
           if (m.tags !== "") line += ` tags:${m.tags}`;
           line += `\n${m.content}`;
           line += `\n(id:${m.id}, recalls:${m.recall_count + 1})`;
